@@ -1,0 +1,35 @@
+FROM centos:7
+
+LABEL maintainer.name="ROOT team"
+LABEL maintainer.email="root-dev@cern.ch"
+
+COPY library-scripts/packages packages
+
+COPY library-scripts/*.sh /tmp/library-scripts/
+COPY library-scripts/scl_enable /opt/app-root/etc/
+
+RUN yum update -q -y \
+    && yum install -y https://repo.ius.io/ius-release-el7.rpm epel-release centos-release-scl \
+    && yum install -y $(cat packages-centos) \
+    && localedef -i en_US -f UTF-8 en_US.UTF-8 \
+    && rm -f /packages \
+    && yum clean all
+
+ENV APP_ROOT=/opt/app-root
+ENV BASH_ENV=${APP_ROOT}/etc/scl_enable \
+    ENV=${APP_ROOT}/etc/scl_enable \
+    PROMPT_COMMAND=". ${APP_ROOT}/etc/scl_enable"
+
+RUN bash /tmp/library-scripts/provide-cmake.sh \
+    && bash /tmp/library-scripts/provide-libssh2.sh \
+    && bash /tmp/library-scripts/provide-boost.sh \
+    && bash /tmp/library-scripts/provide-cppzmq.sh \
+    && rm -rf /tmp/library-scripts
+
+ARG USERNAME=vscode
+ARG USER_UID=1000
+ARG USER_GID=${USER_UID}
+
+COPY library-scripts/*.sh /tmp/library-scripts/
+
+RUN bash /tmp/library-scripts/provide-user.sh ${USERNAME} ${USER_UID} ${USER_GID}
