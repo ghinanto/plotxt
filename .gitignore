@@ -1,6 +1,7 @@
 CMakeLists.txt
 build
+src
 .cspell
-src/
 pltxt.cpp
 .vscode
+log.txt
