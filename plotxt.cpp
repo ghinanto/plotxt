@@ -1,8 +1,19 @@
+// Builds a graph with errors, displays it and saves it
+// as image. First, include some header files (within,
+// CINT these will be ignored).
+
+#include "TArrow.h"
+#include "TCanvas.h"
+#include "TF1.h"
+#include "TGraphErrors.h"
+#include "TLatex.h"
+#include "TLegend.h"
+#include "TROOT.h"
 #include "TGraph.h"
 #include "TH1D.h"
 #include "TH1I.h"
 #include "TObject.h"
-#include <boost/program_options.hpp>
+#include <assert.h>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -10,8 +21,6 @@
 #include <map>
 #include <sstream>
 #include <vector>
-
-std::vector<std::string> plots{"TGraph", "TH1D", "TH1I"};
 
 // Returns the column names line, i.e. the last line of the header.
 // After calling this method the stream is ready to read data.
@@ -41,7 +50,7 @@ std::vector<T> get_column(std::string const& file_in_name,
 
 struct PlotAttributes
 {
-  std::string plot_function;
+  std::string plot_function{""};
   std::string draw_options{""};
 };
 
@@ -61,7 +70,7 @@ void flush_message(std::ostream& out, TArgs const&... out_args)
 
 // Plot using a map containing vectors of data.
 template<class T>
-void myplot(std::map<std::string, std::vector<T>> axes,
+void plotxt(std::map<std::string, std::vector<T>> axes,
             std::vector<std::string> labels, PlotAttributes const& plot_attr)
 {
   assert(!axes.empty() && !labels.empty() && "No data to plot.");
@@ -102,7 +111,7 @@ void myplot(std::map<std::string, std::vector<T>> axes,
 
 // Plot passing column indexes as parameters
 template<class T>
-void myplot(std::filesystem::path data_file,
+void plotxt(std::filesystem::path data_file,
             std::vector<int> const& column_indexes,
             PlotAttributes const& plot_attr)
 {
@@ -118,22 +127,22 @@ void myplot(std::filesystem::path data_file,
     axes[label] = get_column<T>(data_file, index);
   }
 
-  return myplot<T>(axes, labels, plot_attr);
+  return plotxt<T>(axes, labels, plot_attr);
 }
 
 // Required to pass brace-list initializer as argument
 template<class T>
-void myplot(std::filesystem::path data_file,
+void plotxt(std::filesystem::path data_file,
             std::initializer_list<int> const& column_indexes,
             PlotAttributes const& plot_attr)
 {
   std::vector<int> indexes_vec = column_indexes;
-  return myplot<T>(data_file, indexes_vec, plot_attr);
+  return plotxt<T>(data_file, indexes_vec, plot_attr);
 }
 
 // Plot using column names as parameters
 template<class T>
-void myplot(std::filesystem::path data_file,
+void plotxt(std::filesystem::path data_file,
             std::vector<std::string> const& column_names,
             PlotAttributes const& plot_attr)
 {
@@ -143,25 +152,25 @@ void myplot(std::filesystem::path data_file,
     axes[label] = get_column<T>(data_file, label);
   }
 
-  return myplot<T>(axes, labels, plot_attr);
+  return plotxt<T>(axes, labels, plot_attr);
 }
 
 // Required to pass brace-list initializer as argument
 template<class T>
-void myplot(std::filesystem::path data_file,
+void plotxt(std::filesystem::path data_file,
             std::initializer_list<std::string> const& column_indexes,
             PlotAttributes const& plot_attr)
 {
   std::vector<std::string> names_vec = column_indexes;
-  return myplot<T>(data_file, names_vec, plot_attr);
+  return plotxt<T>(data_file, names_vec, plot_attr);
 }
 
 #ifndef __CINT__
-#  include "TApplication.h"
-#  include <boost/program_options.hpp>
-#  include <algorithm>
-#  include <iomanip>
-#  include <thread>
+#include "TApplication.h"
+#include <boost/program_options.hpp>
+#include <algorithm>
+#include <iomanip>
+#include <thread>
 namespace po = boost::program_options;
 
 // TArgs must be types for which operator<< is overloaded
@@ -171,107 +180,70 @@ void exit_message(std::ostream& out, TArgs const&... out_args)
   (out << ... << out_args) << std::endl;
   std::exit(-1);
 }
-// Contains all variables needed to read args
-struct CLIArgs
+
+void StandaloneApplication(int argc, char** argv)
 {
   std::filesystem::path data_file;
   bool list_columns{false};
   std::vector<std::string> data_columns;
   PlotAttributes plot_attr;
-};
-// Containing Interface and map to store args
-struct CLIParser
-{
-  po::variables_map vm;
-  po::options_description desc{"Options"};
-  std::string usage;
-};
 
-CLIParser getCLIParser(int argc, char** argv)
-{
-  CLIParser cli_parser;
-  CLIArgs cli_args;
-
-  cli_parser.usage =
-      // clang-format off
+  std::string usage =
+  // clang-format off
     static_cast<std::string>("Usage:") // Cast needed to use the operator+
     + "\n  ./pltxt -h" + "\n  ./pltxt -d <data_file> -l"
     + "\n  ./pltxt -d <data_file> -c COLUMN_INDEX | COLUMN_NAME [COLUMN_INDEX | COLUMN_NAME...] -p PLOT_FUNCTION [-o DRAW_OPTIONS]";
   // clang-format on
 
-  cli_parser.desc.add_options()
-      // clang-format off
-    ("help,h", "Print help message.")
-    ("data-file,d", po::value<std::filesystem::path>(&cli_args.data_file)->value_name("<data_file>"), "The file containing data arranged in columns.")
-    ("list-column-names,l", po::bool_switch(&cli_args.list_columns)->default_value(false), "Show column names. Read them from the first line before data in <data_file>.")
-    ("data-columns,c", po::value<std::vector<std::string>>(&cli_args.data_columns)->multitoken()->value_name("COLUMN_NAME | COLUMN_INDEX"), "The indexes or names of columns containing data to plot.")
-    ("plot-function,p", po::value<std::string>(&cli_args.plot_attr.plot_function)->value_name("PLOT_FUNCTION"), "The ROOT function for plotting data. See ROOT documentation to know more.")
-    ("draw-options,o", po::value<std::string>(&cli_args.plot_attr.draw_options)->value_name("DRAW_OPTIONS")->default_value(""), "Options to pass to ROOT Draw function. See ROOT documentation to know more.");
+  po::options_description desc{"Options"};
+  desc.add_options()
+    // clang-format off
+  ("help,h", "Print help message.")
+  ("data-file,d", po::value<std::filesystem::path>(&data_file)->value_name("<data_file>")->required(), "The file containing data arranged in columns.")
+  ("list-column-names,l", po::bool_switch(&list_columns)->default_value(false), "Show column names. Read them from the first line before data in <data_file>.")
+  ("data-columns,c", po::value<std::vector<std::string>>(&data_columns)->multitoken()->value_name("COLUMN_NAME | COLUMN_INDEX"), "The indexes or names of columns containing data to plot.")
+  ("plot-function,p", po::value<std::string>(&plot_attr.plot_function)->value_name("PLOT_FUNCTION"), "The ROOT function for plotting data. See ROOT documentation to know more.")
+  ("draw-options,o", po::value<std::string>(&plot_attr.draw_options)->value_name("DRAW_OPTIONS")->default_value(""), "Options to pass to ROOT Draw function. See ROOT documentation to know more.");
   // clang-format on
 
   try {
-    po::store(
-        po::command_line_parser(argc, argv).options(cli_parser.desc).run(),
-        cli_parser.vm);
-    // po::notify(cli_parser.vm);
+    po::variables_map vm;
+    po::store(po::command_line_parser(argc, argv).options(desc).run(), vm);
+    if (vm.count("help")) {
+      exit_message(std::cout, usage, "\n\n", desc);
+    }
+
+    po::notify(vm);
   } catch (po::error const& e) {
-    exit_message(std::cerr, e.what(), '\n', cli_parser.usage, '\n');
+    exit_message(std::cerr, e.what(), '\n', usage, '\n');
   } catch (std::exception const& e) {
     exit_message(std::cerr, e.what());
   } catch (...) {
     exit_message(std::cerr, "Unknown exception. Quitting...");
   }
 
-  return cli_parser;
-}
 
-void StandaloneApplication(int argc, char** argv)
-{
-  CLIParser cli_parser = getCLIParser(argc, argv);
-  CLIArgs cli_args;
-
-  // help
-  if (cli_parser.vm.count("help")) {
-    exit_message(std::cout, cli_parser.usage + "\n\n", cli_parser.desc);
+  if (list_columns) {
+    exit_message(std::cout, read_header(data_file));
   }
 
-  // data file is required
-  if (!cli_parser.vm.count("data-file")) {
-    exit_message(std::cerr, cli_parser.usage);
+  if (data_columns.empty()) {
+    exit_message(std::cout, usage);
   }
-  cli_args.data_file = cli_parser.vm["data-file"].as<std::filesystem::path>();
-
-  if (cli_parser.vm["list-column-names"].as<bool>()) {
-    exit_message(std::cout, read_header(cli_args.data_file));
-  }
-
-  // plot function is required
-  if (!cli_parser.vm.count("plot-function")) {
-    exit_message(std::cerr, cli_parser.usage);
-  }
-  cli_args.plot_attr.plot_function =
-      cli_parser.vm["plot-function"].as<std::string>();
-  cli_args.plot_attr.draw_options =
-      cli_parser.vm["draw-options"].as<std::string>();
-
-  // data columns are required
-  if (!cli_parser.vm.count("data-columns"))
-    exit_message(std::cerr, cli_parser.usage);
-
-  cli_args.data_columns =
-      cli_parser.vm["data-columns"].as<std::vector<std::string>>();
 
   flush_message(std::clog, "\nReading data...");
   try {
     std::vector<int> index_vec;
-    for (std::string const& column : cli_args.data_columns) {
+    for (std::string const& column : data_columns) {
       index_vec.push_back(std::stoi(column));
     }
 
-    myplot<int>(cli_args.data_file, index_vec, cli_args.plot_attr);
+    myplot<int>(data_file, index_vec, plot_attr);
   } catch (std::invalid_argument& ia) {
-    myplot<int>(cli_args.data_file, cli_args.data_columns, cli_args.plot_attr);
+    myplot<int>(data_file, data_columns, plot_attr);
   }
+
+    //macro1();
 }
 
 int main(int argc, char** argv)
@@ -283,6 +255,7 @@ int main(int argc, char** argv)
   return 0;
 }
 #endif
+
 
 std::string read_header(std::istream& file_in, int header_lines)
 {
